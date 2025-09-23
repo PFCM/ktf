@@ -1,0 +1,13 @@
+apiVersion: core/v1
+kind: Namespace
+metadata:
+  name: namespace-test
+  annotations:
+    some-annotation: "0.1"
+    complex.annotation.test.com/something: v19+blarg
+  labels:
+    llaabbel: yep
+    big-label: |
+      haha
+      ha
+      haha

@@ -1,0 +1,103 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: "test-deployment"
+  namespace: "test"
+  annotations:
+    annotation.test.org/note: ah
+  labels:
+    label-time: now
+
+spec:
+  minReadySeconds: 1
+  paused: false
+  progressDeadlineSeconds: 1
+  replicas: "3"
+  selector:
+    matchLabels:
+      test: testy
+    matchExpressions:
+    - key: taste
+      operator: NotIn
+      values:
+      - testing
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: "123"
+      maxUnavailable: "10%"
+  template:
+    metadata:
+      labels:
+        test: testy
+    spec:
+      activeDeadlineSeconds: 10
+      affinity:
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            labelSelector:
+              matchLabels:
+                test: testy
+            topologyKey: "dc"
+      automountServiceAccountToken: true
+      containers:
+      - name: "the-container"
+        image: "container-image"
+        env:
+        - name: "ENVIRONMENT"
+          value: "test"
+        ports:
+        - name: https
+          protocol: TCP
+          containerPort: 443
+        - name: http
+          protocol: TCP
+          containerPort: 80
+        livenessProbe:
+          initialDelaySeconds: 30
+          failureThreshold: 5
+          periodSeconds: 5
+          exec: 
+            command:
+            - "curl"
+            - "https://localhost:443/debug/alive"
+        readinessProbe:
+          httpGet:
+            path: "/debug/ready"
+            port: "http"
+        volumeMounts:
+        - name: files
+          mountPath: /mnt/files
+        - name: morefiles
+          mountPath: /morefiles
+      - name: "the-other-container"
+        image: "other-image"
+        env:
+        - name: "VENMIRONETN"
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+        resources:
+          requests:
+            cpu: "1"
+            memory: "2Gi"
+        securityContext:
+          allowPrivilegeEscalation: true
+          capabilities:
+            add: ["CAP_BPF"]
+        volumeDevices:
+        - name: block
+          devicePath: /dev/block
+      volumes:
+      - name: "files"
+        csi:
+          driver: "some-driver"
+          fsType: "ext4"
+          volumeAttributes:
+            someAttr: "ya"
+      - name: morefiles
+        configMap:
+          name: config
+        
+        
+            
