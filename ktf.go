@@ -4,6 +4,7 @@ package ktf
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"io"
 
 	"github.com/hashicorp/hcl/v2/hclwrite"
@@ -33,7 +34,7 @@ func Convert(in io.Reader, out io.Writer) error {
 		}
 		block, err := convert.Convert(r)
 		if err != nil {
-			return err
+			return fmt.Errorf("converting resource %+v/%v: %w", r.TypeKey, r.Metadata.Name, err)
 		}
 		b.AppendBlock(block)
 	}

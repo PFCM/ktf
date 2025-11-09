@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"maps"
 	"slices"
+	"strings"
 
 	"github.com/hashicorp/hcl/v2/hclsyntax"
 	"github.com/hashicorp/hcl/v2/hclwrite"
@@ -107,9 +108,9 @@ func writeFromSpec(spec gen.ConverterSpec, b *hclwrite.Block, data map[string]an
 }
 
 func convertToManifest(r resource.Resource) (*hclwrite.Block, error) {
-	// manifest are a lot trickier to write using hclwrite because
-	// the types are quite awkward.
-	b := hclwrite.NewBlock("kubernetes_manifest", []string{resource.ToSnake(r.Metadata.Name)})
+	name := resource.ToSnake(strings.Join([]string{r.Kind, r.Metadata.Name}, "__"))
+	name = strings.ReplaceAll(name, ".", "_")
+	b := hclwrite.NewBlock("resource", []string{"kubernetes_manifest", name})
 
 	tokens, err := manifestDataTokens(r)
 	if err != nil {
