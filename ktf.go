@@ -18,7 +18,7 @@ import (
 // resources, which will be written to out.
 func Convert(in io.Reader, out io.Writer) error {
 	var (
-		d = yaml.NewYAMLOrJSONDecoder(in, 1024)
+		d = yaml.NewYAMLOrJSONDecoder(in, 4*1024)
 		f = hclwrite.NewEmptyFile()
 		b = f.Body()
 	)

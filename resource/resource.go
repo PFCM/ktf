@@ -5,7 +5,6 @@ package resource
 import (
 	"encoding/json"
 	"fmt"
-	"maps"
 	"strings"
 	"unicode"
 
@@ -19,44 +18,40 @@ type Resource struct {
 	TypeKey
 
 	Metadata PartialMetadata
-	Spec     map[string]any
+	Raw      map[string]any // everything, including the keys pulled out above
 }
 
 func New() Resource {
 	return Resource{
-		Spec: make(map[string]any),
+		Raw: make(map[string]any),
 	}
 }
 
 // IsEmpty reports if a Resource has any fields set at all. People often seem to
 // put completely empty documents in their yaml for some reason.
 func (r Resource) IsEmpty() bool {
-	return (r.APIVersion == "" &&
-		r.Kind == "" &&
-		r.Metadata.Name == "" &&
-		r.Metadata.Namespace == "" &&
-		len(r.Metadata.Meta) == 0 &&
-		len(r.Spec) == 0)
+	return len(r.Raw) == 0
 }
 
-// ToMap builds a map containing the entire definition of the resource, as if it
-// was parse from JSON/YAML straight into a map[string]any
-func (r Resource) ToMap() map[string]any {
-	md := map[string]any{
-		"name": r.Metadata.Name,
+// UnmarshalJSON unmarshals a Resource, pulling out the metadata that's useful
+// for deciding how to turn it into a terraform resource and leaving everything
+// else in Remainder.
+func (r *Resource) UnmarshalJSON(raw []byte) error {
+	typeMeta := struct {
+		TypeKey
+		Metadata PartialMetadata `json:"metadata"`
+	}{}
+	if err := json.Unmarshal(raw, &typeMeta); err != nil {
+		return err
 	}
-	if ns := r.Metadata.Namespace; ns != "" {
-		md["namespace"] = ns
+	all := make(map[string]any)
+	if err := json.Unmarshal(raw, &all); err != nil {
+		return err
 	}
-	maps.Copy(md, r.Metadata.Meta)
-	m := map[string]any{
-		"apiVersion": r.APIVersion,
-		"kind":       r.Kind,
-		"metadata":   md,
-		"spec":       r.Spec,
-	}
-
-	return m
+	r.TypeKey = typeMeta.TypeKey
+	r.Metadata = typeMeta.Metadata
+	r.Raw = all
+	return nil
 }
 
 // TypeKey contains enough to identify the type of a resource/object, used to

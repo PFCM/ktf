@@ -25,19 +25,7 @@ func Convert(r resource.Resource) (*hclwrite.Block, error) {
 
 func convertFromSpec(spec gen.ConverterSpec, resourceName string, r resource.Resource) (*hclwrite.Block, error) {
 	b := hclwrite.NewBlock("resource", []string{resourceName, resource.ToSnake(r.Metadata.Name)})
-	md := maps.Clone(r.Metadata.Meta)
-	md["name"] = r.Metadata.Name
-	if r.Metadata.Namespace != "" {
-		md["namespace"] = r.Metadata.Namespace
-	}
-	raw := map[string]any{
-		"metadata": md,
-	}
-	if _, ok := spec.Blocks["spec"]; ok {
-		raw["spec"] = maps.Clone(r.Spec)
-	}
-
-	if err := writeFromSpec(spec, b, raw); err != nil {
+	if err := writeFromSpec(spec, b, r.Raw); err != nil {
 		return nil, err
 	}
 	return b, nil
@@ -100,7 +88,9 @@ func writeFromSpec(spec gen.ConverterSpec, b *hclwrite.Block, data map[string]an
 			}
 		}
 	}
-
+	for _, k := range []string{"apiVersion", "kind"} {
+		delete(leftovers, k)
+	}
 	if len(leftovers) != 0 {
 		return fmt.Errorf("leftover keys: %v", slices.Collect(maps.Keys(leftovers)))
 	}
@@ -239,8 +229,16 @@ func manifestDataTokens(r resource.Resource) (hclwrite.Tokens, error) {
 		return emitSingle('\n', 0)
 	}
 
-	if err := emitValue(r.ToMap()); err != nil {
+	if err := emitValue(r.Raw); err != nil {
 		return nil, err
 	}
 	return tokens, nil
+}
+
+func keySet[K comparable, V any](m map[K]V) map[K]bool {
+	out := make(map[K]bool, len(m))
+	for k := range m {
+		out[k] = true
+	}
+	return out
 }
