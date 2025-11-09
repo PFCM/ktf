@@ -63,11 +63,16 @@ func toFloat(a any) (cty.Value, error) {
 }
 
 func toString(a any) (cty.Value, error) {
-	s, ok := a.(string)
-	if !ok {
+	switch v := a.(type) {
+	case string:
+		return cty.StringVal(v), nil
+	case float64, bool:
+		// Sometimes people don't quote things that are expected to be
+		// strings.
+		return cty.StringVal(fmt.Sprint(v)), nil
+	default:
 		return cty.Value{}, fmt.Errorf("expected string, got %T (value %v)", a, a)
 	}
-	return cty.StringVal(s), nil
 }
 
 func toStringMap(in any) (cty.Value, error) {

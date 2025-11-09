@@ -2,6 +2,7 @@
 package ktf
 
 import (
+	"bytes"
 	"errors"
 	"io"
 
@@ -36,6 +37,12 @@ func Convert(in io.Reader, out io.Writer) error {
 		}
 		b.AppendBlock(block)
 	}
-	_, err := f.WriteTo(out)
+	var buf bytes.Buffer
+	if _, err := f.WriteTo(&buf); err != nil {
+		return err
+	}
+	formatted := hclwrite.Format(buf.Bytes())
+
+	_, err := out.Write(formatted)
 	return err
 }

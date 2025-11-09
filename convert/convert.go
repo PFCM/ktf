@@ -7,41 +7,17 @@ import (
 	"maps"
 	"slices"
 
+	"github.com/hashicorp/hcl/v2/hclsyntax"
 	"github.com/hashicorp/hcl/v2/hclwrite"
 
 	"github.com/pfcm/ktf/convert/gen"
 	"github.com/pfcm/ktf/resource"
 )
 
-// // Converter translates a resource to a single HCL block.
-// type Converter func(resource.Resource) (*hclwrite.Block, error)
-
-// // converters is the big map of TypeKey to converter. All new converters need to
-// // be added in here. To get a converter, use getConverter, which supplies the
-// // appropriate default.
-// var converters = map[resource.TypeKey]Converter{
-// 	{APIVersion: "v1", Kind: "Namespace"}:           namespace,
-// 	{APIVersion: "core/v1", Kind: "Namespace"}:      namespace,
-// 	{APIVersion: "v1", Kind: "ServiceAccount"}:      serviceAccount,
-// 	{APIVersion: "core/v1", Kind: "ServiceAccount"}: serviceAccount,
-// 	{APIVersion: "apps/v1", Kind: "Deployment"}: func(r resource.Resource) (*hclwrite.Block, error) {
-// 		return convertFromSpec(kubernetesDeploymentV1, "kubernetes_deployment_v1", r)
-// 	},
-// }
-
-// // Get returns the best converter for the given TypeKey.
-// func Get(tk resource.TypeKey) Converter {
-// 	if c, ok := converters[tk]; ok {
-// 		return c
-// 	}
-// 	return toManifest
-// }
-
 func Convert(r resource.Resource) (*hclwrite.Block, error) {
 	spec, ok := gen.FindSpec(r.TypeKey)
 	if !ok {
-		// TODO: fallback to manifest
-		return nil, fmt.Errorf("no converter registered for %v", r.TypeKey)
+		return convertToManifest(r)
 	}
 	return convertFromSpec(spec, spec.ResourceName, r)
 }
@@ -130,69 +106,140 @@ func writeFromSpec(spec gen.ConverterSpec, b *hclwrite.Block, data map[string]an
 	return nil
 }
 
-// serviceAccount converts a service account.
-// func serviceAccount(r resource.Resource) (*hclwrite.Block, error) {
-// 	b := hclwrite.NewBlock("resource", []string{
-// 		"kubernetes_service_account",
-// 		ToSnake(r.Metadata.Name),
-// 	})
-// 	if err := appendMetadata(b, r.Metadata); err != nil {
-// 		return nil, err
-// 	}
-// 	return b, nil
-// }
+func convertToManifest(r resource.Resource) (*hclwrite.Block, error) {
+	// manifest are a lot trickier to write using hclwrite because
+	// the types are quite awkward.
+	b := hclwrite.NewBlock("kubernetes_manifest", []string{resource.ToSnake(r.Metadata.Name)})
 
-// // namespace converts a namespace resource, which is just about the simplest
-// // possible.
-// func namespace(r resource.Resource) (*hclwrite.Block, error) {
-// 	b := hclwrite.NewBlock("resource", []string{"kubernetes_namespace", ToSnake(r.Metadata.Name)})
-// 	if err := appendMetadata(b, r.Metadata); err != nil {
-// 		return nil, err
-// 	}
-// 	return b, nil
-// }
+	tokens, err := manifestDataTokens(r)
+	if err != nil {
+		return nil, err
+	}
+	b.Body().SetAttributeRaw("manifest", tokens)
 
-// func appendMetadata(b *hclwrite.Block, p resource.PartialMetadata) error {
-// 	md := b.Body().AppendNewBlock("metadata", nil).Body()
+	return b, nil
+}
 
-// 	md.SetAttributeValue("name", cty.StringVal(p.Name))
-// 	if p.Namespace != "" {
-// 		md.SetAttributeValue("namespace", cty.StringVal(p.Namespace))
-// 	}
-// 	// These fields and their types (give or take the conversion to cty)
-// 	// come directly from
-// 	// https://github.com/hashicorp/terraform-provider-kubernetes/blob/v2.38.0/kubernetes/schema_metadata.go
-// 	// TODO: does the order matter?
-// 	for name, toCty := range map[string]func(any) (cty.Value, error){
-// 		"annotations": toStringMap,
-// 		"labels":      toStringMap,
-// 	} {
-// 		val, ok := p.Meta[name]
-// 		if !ok {
-// 			continue
-// 		}
-// 		v, err := toCty(val)
-// 		if err != nil {
-// 			return err
-// 		}
-// 		md.SetAttributeValue(name, v)
-// 	}
-// 	return nil
-// }
+func manifestDataTokens(r resource.Resource) (hclwrite.Tokens, error) {
+	var tokens hclwrite.Tokens
 
-// // toManifest is the generic fallback converter that produces a block containing
-// // a kubernetes_manifest resource.
-// // TODO: make a proper name if it has a generatable name
-// func toManifest(r resource.Resource) (*hclwrite.Block, error) {
-// 	nameElems := []string{r.Metadata.Namespace, r.Metadata.Name, r.Kind}
-// 	if r.Metadata.Namespace == "" {
-// 		nameElems = nameElems[1:]
-// 	}
-// 	name := ToSnake(strings.Join(nameElems, "_"))
+	emitSingle := func(b byte, spacesBefore int) error {
+		var t hclsyntax.TokenType
+		switch b {
+		case '{':
+			t = hclsyntax.TokenOBrace
+		case '}':
+			t = hclsyntax.TokenCBrace
+		case '[':
+			t = hclsyntax.TokenOBrack
+		case ']':
+			t = hclsyntax.TokenCBrack
+		case '=':
+			t = hclsyntax.TokenEqual
+		case ',':
+			t = hclsyntax.TokenComma
+		case '\n':
+			t = hclsyntax.TokenNewline
+		default:
+			return fmt.Errorf("unknown single char token: %q", b)
+		}
+		tokens = append(tokens, &hclwrite.Token{
+			Type:         t,
+			Bytes:        []byte{b},
+			SpacesBefore: spacesBefore,
+		})
+		return nil
+	}
+	emitString := func(s string) {
+		tokens = append(tokens, &hclwrite.Token{
+			Type:  hclsyntax.TokenQuotedLit,
+			Bytes: fmt.Appendf(nil, "%q", s),
+		})
+	}
+	emitFloat64 := func(f float64) {
+		tokens = append(tokens, &hclwrite.Token{
+			Type:  hclsyntax.TokenNumberLit,
+			Bytes: fmt.Append(nil, f),
+		})
+	}
+	emitBool := func(b bool) {
+		tokens = append(tokens, &hclwrite.Token{
+			Type:  hclsyntax.TokenStringLit, // or Ident?
+			Bytes: fmt.Append(nil, b),
+		})
+	}
 
-// 	// The kubernetes_manifest resource is kind of cursed, because the
-// 	// "manifest" attribute is just a huge map, with values that might be
-// 	// anything. This is very tricky to represent in any of terraform's
-// 	// surprisingly numerous and nearly identical type systems.
-// 	return nil, fmt.Errorf("no implemented (%s)", name)
-// }
+	// forward declarations so these closures can mutually recurse.
+	var (
+		emitValue func(any) error
+		emitMap   func(map[string]any) error
+		emitList  func([]any) error
+		emitAttr  func(string, any) error
+	)
+	emitValue = func(a any) error {
+		switch v := a.(type) {
+		case string:
+			emitString(v)
+		case float64:
+			emitFloat64(v)
+		case bool:
+			emitBool(v)
+		case map[string]any:
+			return emitMap(v)
+		case []any:
+			return emitList(v)
+		default:
+			return fmt.Errorf("unhandled type in manifest: %T (value: %v)", v, v)
+		}
+		return nil
+	}
+	emitMap = func(m map[string]any) error {
+		if err := emitSingle('{', 1); err != nil {
+			return err
+		}
+		if err := emitSingle('\n', 0); err != nil {
+			return err
+		}
+
+		names := slices.Collect(maps.Keys(m))
+		slices.Sort(names)
+		for _, name := range names {
+			if err := emitAttr(name, m[name]); err != nil {
+				return err
+			}
+		}
+
+		return emitSingle('}', 1)
+	}
+	emitList = func(l []any) error {
+		if err := emitSingle('[', 1); err != nil {
+			return err
+		}
+
+		for i, v := range l {
+			if err := emitValue(v); err != nil {
+				return err
+			}
+			if i != len(l)-1 {
+				emitSingle(',', 0)
+			}
+		}
+
+		return emitSingle(']', 1)
+	}
+	emitAttr = func(name string, value any) error {
+		// "name" = <value>
+		emitString(name)
+		emitSingle('=', 1)
+
+		if err := emitValue(value); err != nil {
+			return err
+		}
+		return emitSingle('\n', 0)
+	}
+
+	if err := emitValue(r.ToMap()); err != nil {
+		return nil, err
+	}
+	return tokens, nil
+}

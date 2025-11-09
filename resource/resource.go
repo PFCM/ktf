@@ -5,6 +5,7 @@ package resource
 import (
 	"encoding/json"
 	"fmt"
+	"maps"
 	"strings"
 	"unicode"
 
@@ -36,6 +37,26 @@ func (r Resource) IsEmpty() bool {
 		r.Metadata.Namespace == "" &&
 		len(r.Metadata.Meta) == 0 &&
 		len(r.Spec) == 0)
+}
+
+// ToMap builds a map containing the entire definition of the resource, as if it
+// was parse from JSON/YAML straight into a map[string]any
+func (r Resource) ToMap() map[string]any {
+	md := map[string]any{
+		"name": r.Metadata.Name,
+	}
+	if ns := r.Metadata.Namespace; ns != "" {
+		md["namespace"] = ns
+	}
+	maps.Copy(md, r.Metadata.Meta)
+	m := map[string]any{
+		"apiVersion": r.APIVersion,
+		"kind":       r.Kind,
+		"metadata":   md,
+		"spec":       r.Spec,
+	}
+
+	return m
 }
 
 // TypeKey contains enough to identify the type of a resource/object, used to
